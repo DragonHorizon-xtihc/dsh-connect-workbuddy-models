@@ -11,3 +11,5 @@ coverage/
 .npmrc
 # docs/ 是本地取证与评审笔记，含本机绝对路径与探针细节，不随开源仓库发布。
 docs/
+# .workbuddy/ 是本地工作记录（会话日志、任务上下文），不进公开仓库。
+.workbuddy/
