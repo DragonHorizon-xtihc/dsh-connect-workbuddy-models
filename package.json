@@ -2,7 +2,7 @@
   "name": "dsh-connect-workbuddy-models",
   "displayName": "DSH Connect WorkBuddy Models",
   "description": "把本机所有 WorkBuddy 登录账号聚合成一个模型池：账号自动发现、签到、积分与到期、临期提醒、自动签到、模型与倍率，并可在输入框下方切换账号与查看剩余总积分。",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "author": "DragonHorizon-xtihc",
   "homepage": "https://github.com/DragonHorizon-xtihc/dsh-connect-workbuddy-models#readme",

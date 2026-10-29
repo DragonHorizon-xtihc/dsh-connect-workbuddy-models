@@ -104,7 +104,7 @@ Windows 构建会加密令牌字段，这种情况让用户「重新登录」是
 1. 在 `dependencies` 加入：
 
    ```json
-   "dsh-connect-workbuddy-models": "^0.1.0"
+   "dsh-connect-workbuddy-models": "^0.1.1"
    ```
 
 2. 在同一文件的 `dsh.profile.bundles` 数组里加入包名（`cordis.patch.yml` 的 `insert` 就作用在这里）：
