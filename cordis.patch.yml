@@ -1,0 +1,21 @@
+# WorkBuddy 模型池插件（dsh-connect-workbuddy-models）的 cordis 加载条目。
+#
+# 为什么每条都要写清楚，因为下面这两点任意一条错了都不会报错，只会「看起来
+# 少了一半功能」：
+#
+# 1. `id: workbuddy-models` 是本条目在 cordis 配置里的**插件实例 id**，同时
+#    也是 0.1.7 线写设置时的 namespace 来源（`ctx.fiber.entry.options.id`）。
+#    `name` 必须与 package.json 的 `name` 完全一致，否则宿主解析不到包。
+#
+# 2. **provider id 用 `workbuddy-models`，不是 `workbuddy`。**
+#    本机同时可能装着 `dsh-connect-workbuddy`（4.15.1），它已经注册了
+#    provider `workbuddy` 与 `workbuddy-global`
+#    （见 plugins/dsh-connect-workbuddy/src/adapter.ts:46,49）。
+#    cordis 的 llm 服务不允许同一个 provider id 注册两次——重复注册会抛
+#    「provider 已注册」类异常，后加载的这一份整份注册失败（连带它自己的模型
+#    目录一起消失），而用户看到的只是模型列表变短，不是冲突提示。
+#    因此本插件注册 `workbuddy-models`（国内）与 `workbuddy-models-global`（国际），
+#    与既有插件互不抢占。
+- insert:
+    - id: workbuddy-models
+      name: dsh-connect-workbuddy-models

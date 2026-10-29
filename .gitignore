@@ -1,0 +1,13 @@
+node_modules/
+.pnpm-store/
+# 注意：lib/ 不忽略 —— 参照 dsh-workbuddy-xdpool 与 dsh-connect-trae 的做法，
+# 把构建产物提交入库，这样 `dsh plugin add github:...` 安装时无需安装期脚本
+# （pnpm 11 默认拦截这些脚本），也不会因为缺少构建产物导致 lib/index.js 加载失败。
+# 修改 src 后请重新执行 `pnpm build`，并把 lib/ 与源码一起提交。
+coverage/
+*.log
+.env
+.DS_Store
+.npmrc
+# docs/ 是本地取证与评审笔记，含本机绝对路径与探针细节，不随开源仓库发布。
+docs/
