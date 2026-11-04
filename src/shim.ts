@@ -72,6 +72,15 @@ export interface WbShimOptions {
 const REQUEST_BODY_LIMIT = 64 * 1024 * 1024
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
 
+/**
+ * 窗口未知（请求没带 model，或目录里查不到）时的兜底窗口。
+ *
+ * 与 `adapter.ts` 的 `WB_DEFAULT_CONTEXT_WINDOW` 同值；这里不复用后者以避免
+ * shim → adapter 的循环依赖。语义一致：未知窗口时按「偏小的保守值」去裁，宁可多裁
+ * 旧历史，也不把超窗请求发给上游去撞 `preflight_compress_failed`。
+ */
+const SHIM_DEFAULT_CONTEXT_WINDOW = 128_000
+
 /** 各上游失败类映射到的 HTTP 状态码。 */
 const KIND_STATUS: Readonly<Record<WbUpstreamErrorKind, number>> = {
   hard_credit: 402,
@@ -187,8 +196,135 @@ export function isContextTooLong(body: string): boolean {
   if (body.includes('input length too long')) return true
   if (body.includes('context window exceeded')) return true
   if (body.includes('maximum context length')) return true
+  if (body.includes('preflight_compress_failed')) return true
+  if (body.toLowerCase().includes('not forwarded')) return true
   if (/exceeds?\s+(the\s+)?(model\s+)?context\s+(window|limit)/iu.test(body)) return true
+  if (/exceeds?\s+(the\s+)?model\s+window/iu.test(body)) return true
   return false
+}
+
+/**
+ * 近似 token 估算（用于发前窗口裁剪）。
+ *
+ * 不开销一个真正的分词器：CJK/全角字符约 1 token/字，其余（拉丁、数字、标点）约
+ * 4 字符 1 token。这是有偏差的近似，但裁剪是**安全兜底**，偏保守（略高估）只会多裁
+ * 一点旧历史，不会把请求送过窗口。
+ */
+function estimateTokens(text: string): number {
+  if (text === '') return 0
+  let cjk = 0
+  let other = 0
+  for (const ch of text) {
+    // 大于 U+2E80 基本覆盖 CJK 与全角符号（够近似，不必精确判定 Unicode 块）。
+    if (ch.charCodeAt(0) > 0x2e80) cjk += 1
+    else other += 1
+  }
+  return Math.ceil(cjk + other * 0.25)
+}
+
+/** 一条消息的近似 token（含正文、文本 part、tool_calls 参数）。 */
+function messageTokens(message: Record<string, unknown>): number {
+  const content = message['content']
+  let tokens = 0
+  if (typeof content === 'string') {
+    tokens += estimateTokens(content)
+  } else if (Array.isArray(content)) {
+    for (const part of content) {
+      if (typeof part !== 'object' || part === null || Array.isArray(part)) continue
+      const record = part as Record<string, unknown>
+      if (record['type'] === 'text' && typeof record['text'] === 'string') tokens += estimateTokens(record['text'])
+    }
+  }
+  const calls = message['tool_calls']
+  if (Array.isArray(calls)) {
+    for (const call of calls) {
+      if (typeof call !== 'object' || call === null) continue
+      const record = call as Record<string, unknown>
+      const fn = record['function']
+      if (typeof fn === 'object' && fn !== null) tokens += estimateTokens(JSON.stringify(fn))
+    }
+  }
+  // 每条消息的 role/结构固定开销。
+  return tokens + 4
+}
+
+/**
+ * 把超窗的对话在**本地**裁掉最旧的历史，使总 token 估计落在窗口预算内。
+ *
+ * 为什么要有这一道：上游 preflight 压缩层在上下文超过真实窗口时，会用一次「摘要」子
+ * 调用去压缩旧 range；而那次子调用本身被上游 429 限流时，压缩失败、请求直接被丢弃
+ * （`preflight_compress_failed` / `The over-window payload was NOT forwarded`）。本插件的
+ * 目录窗口偏大（hy3 报 192000、真实 144000）会让 DSH 一路把历史堆过真实窗口才压。
+ * 本地先裁一轮，让发出的请求**始终在窗口内**，上游就无需再做那次会失败的紧急压缩。
+ *
+ * 安全性约束（宁可少裁也不破坏请求）：
+ * - 首条 system（规则）永远保留；
+ * - 最近的 {@link MIN_KEEP_RECENT_MESSAGES} 条永远保留（保证本轮上下文连贯）；
+ * - 只丢**最旧的纯文本**消息（role 为 user/assistant 且无 `tool_calls`、且不是 `tool`
+ *   结果）：`tool`/`tool_calls` 配对一旦拆开，上游会直接拒整个请求，所以整段工具交换
+ *   要么一起保留、要么一起不动——这里选择不动，避免破坏配对。
+ *
+ * 无可裁内容（历史几乎全是工具交换）时返回 `undefined`：逐字节原样发出，由上游给出
+ * 清晰的「超窗」结论，而不是这里静默丢东西。解析失败同样返回 `undefined`。
+ */
+export const MIN_KEEP_RECENT_MESSAGES = 8
+
+export function trimToWindow(bodyJson: string, window: number): string | undefined {
+  let body: unknown
+  try {
+    body = JSON.parse(bodyJson)
+  } catch {
+    return undefined
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return undefined
+  const obj = body as Record<string, unknown>
+  const messages = obj['messages']
+  if (!Array.isArray(messages) || messages.length <= 1) return undefined
+
+  // 输入预算：给输出与上游 overhead 留 15% 余量；窗口本身就已是「真实窗口 × 0.9」之后的
+  // 广告值，这里再留一层，确保即便估算偏低也压在硬上限之下。
+  const budget = Math.floor(window * 0.85)
+  let total = 0
+  const sizes: number[] = []
+  for (const value of messages) {
+    const size = typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? messageTokens(value as Record<string, unknown>)
+      : 0
+    sizes.push(size)
+    total += size
+  }
+  if (total <= budget) return undefined
+
+  // 受保护的索引：首条（通常是 system 规则）+ 最近 N 条。
+  const protectedSet = new Set<number>([0])
+  for (let i = 0; i < MIN_KEEP_RECENT_MESSAGES && messages.length - 1 - i >= 0; i += 1) {
+    protectedSet.add(messages.length - 1 - i)
+  }
+
+  /** 一条消息是否「纯文本可丢」：user/assistant 且不含 tool_calls，且不是 tool 角色。 */
+  const droppable = (index: number): boolean => {
+    if (protectedSet.has(index)) return false
+    const value = messages[index]
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+    const message = value as Record<string, unknown>
+    const role = typeof message['role'] === 'string' ? message['role'].trim().toLowerCase() : ''
+    if (role === 'tool') return false
+    if (role === 'assistant' && Array.isArray(message['tool_calls']) && message['tool_calls'].length > 0) return false
+    return role === 'user' || role === 'assistant'
+  }
+
+  const dropped: number[] = []
+  // 从最旧（index 1，跳过首条）往新扫，遇到可丢且不在保护集的就丢，直到预算内。
+  for (let index = 1; index < messages.length && total > budget; index += 1) {
+    if (!droppable(index)) continue
+    total -= sizes[index]!
+    dropped.push(index)
+  }
+  if (dropped.length === 0) return undefined
+
+  const droppedSet = new Set(dropped)
+  obj['messages'] = messages.filter((_, index) => !droppedSet.has(index))
+  return JSON.stringify(obj)
 }
 
 /**
@@ -1136,6 +1272,19 @@ export function createWbShim(options: WbShimOptions): WbShim {
     const modelId = modelIdOf(raw)
     const prepared = prepareChatBody(raw)
 
+    // 发前窗口裁剪：把可能越过真实窗口的历史在本地裁掉最旧部分，使发出的请求始终落在
+    // 窗口内——上游就不需要做那次会被 429 限流、最终 `preflight_compress_failed` 的紧急
+    // 压缩。窗口取目录里已修正过的值（≤ 真实窗口 × 0.9）；查不到时落回保守兜底。
+    const window = (modelId !== undefined ? options.catalog.find(modelId)?.contextWindow : undefined)
+      ?? SHIM_DEFAULT_CONTEXT_WINDOW
+    const trimmed = trimToWindow(prepared, window) ?? prepared
+    if (trimmed !== prepared) {
+      logger?.warn(
+        'dsh-connect-workbuddy-models: 发前裁剪了超窗历史',
+        { model: modelId, window },
+      )
+    }
+
     const tried: string[] = []
     const excluded: string[] = []
     let last: { kind: WbUpstreamErrorKind; status: number; message: string } | undefined
@@ -1194,8 +1343,8 @@ export function createWbShim(options: WbShimOptions): WbShim {
       // DSH 的提示词里被收进去的段落在一天之内就出现了两条——等失败再救等于每次都先
       // 白花两三倍的上游调用。
       //
-      // `undefined` 只在「没有可搬运的 system 正文」时出现，此时原样用 `prepared`。
-      let attemptBody = relocateScannedContent(prepared) ?? prepared
+      // `undefined` 只在「没有可搬运的 system 正文」时出现，此时原样用 `trimmed`。
+      let attemptBody = relocateScannedContent(trimmed) ?? trimmed
 
       let outcome = await client.chatStream(account.credential, attemptBody, controller.signal)
       if (controller.signal.aborted) return
@@ -1250,6 +1399,21 @@ export function createWbShim(options: WbShimOptions): WbShim {
       }
 
       last = { kind: outcome.kind, status: outcome.status, message: outcome.message }
+
+      // 上下文超窗（含上游 `preflight_compress_failed` / `exceeds the model window`）单独给
+      // 一句可执行建议，而不是笼统 502：那会让 DSH 在一个注定失败的请求上以 8080ms 延迟反复重试。
+      // 本地已经裁过一轮，若上游仍报超窗，说明剩下的是裁不动的工具交换或极端长会话，只能靠用户减历史/换模型。
+      if (isContextTooLong(outcome.message)) {
+        const shape = requestShape(raw)
+        logger?.warn('dsh-connect-workbuddy-models: 上下文超过模型窗口', shape, outcome.message.slice(0, 200))
+        writeOpenAIError(
+          res,
+          400,
+          'context_length_exceeded',
+          `这个模型的上下文窗口放不下当前对话（${shape}）；即使本地裁剪历史后仍超出。请减少历史、或换一个更大窗口的模型。`,
+        )
+        return
+      }
 
       if (outcome.kind === 'authentication' || outcome.kind === 'session_dead') {
         // 凭据被上游拒绝是**账号级**事实，不是这次请求的：记进池，让卡片能说「请重新

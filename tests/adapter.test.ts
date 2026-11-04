@@ -122,19 +122,21 @@ describe('模型投影到 pi-ai 形状', () => {
     expect(model?.api).toBe('openai-completions')
   })
 
-  it('缺 contextWindow / maxTokens 时用偏保守的默认值', () => {
+  it('缺 contextWindow 时用保守默认窗口再乘 0.9 安全余量', () => {
     const { adapter } = adapterFor({ models: [{ id: 'a', name: 'A' }] })
     const model = adapter.buildModels()[0]
-    expect(model?.contextWindow).toBe(128_000)
+    // 128000（默认窗口）× 0.9（安全余量）= 115200，避免顶满真实窗口
+    expect(model?.contextWindow).toBe(115_200)
     expect(model?.maxTokens).toBe(8_192)
   })
 
-  it('上游给了窗口就用上游的', () => {
+  it('上游给了窗口也要乘 0.9 安全余量再对外宣告', () => {
     const { adapter } = adapterFor({
       models: [{ id: 'a', name: 'A', contextWindow: 1_000_000, maxTokens: 48_000 }],
     })
     const model = adapter.buildModels()[0]
-    expect(model?.contextWindow).toBe(1_000_000)
+    // 1000000 × 0.9 = 900000：对外宣告真实窗口的 90%，给 trim/压缩留 headroom
+    expect(model?.contextWindow).toBe(900_000)
     expect(model?.maxTokens).toBe(48_000)
   })
 

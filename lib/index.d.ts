@@ -1315,7 +1315,7 @@ declare const FALLBACK_MODELS_CN: readonly WbModelInfo[];
  * （CLI 通道的名册里没有促销模型）。
  */
 declare const FALLBACK_MODELS_GLOBAL: readonly WbModelInfo[];
-/** 某区域的静态兜底名册。 */
+/** 某区域的静态兜底名册（已按真实窗口修正并加安全边际）。 */
 declare function fallbackModelsFor(region: WbRegion): readonly WbModelInfo[];
 /**
  * 按用户选择过滤。

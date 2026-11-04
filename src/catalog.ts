@@ -21,6 +21,66 @@ import { busyDisplaySuffix, parseCreditMultiplier, type WbBusyLevel, type WbUpst
 import type { WbModelInfo, WbRegion } from './status-paths.ts'
 
 /**
+ * 窗口判定的兜底值（与 adapter.ts 的 `WB_DEFAULT_CONTEXT_WINDOW` 同值，这里不复用
+ * 后者以避免 catalog → adapter 的循环依赖）。上下文窗口缺失或非正数时落回它。
+ */
+const CATALOG_DEFAULT_CONTEXT_WINDOW = 128_000
+
+/**
+ * 广告窗口相对「已知/目录窗口」的安全边际。
+ *
+ * 为什么需要：上游 preflight 压缩层在真实窗口之上还有自己的开销（工具 schema、
+ * 本轮输出预留、以及它自己判定的硬上限）。把窗口按 0.9 报出去，等于在真实上限
+ * 之下留出缓冲，让 DSH 的压缩更早触发、每次要压的量更小——直接减小上游紧急摘要
+ * 被 429 限流、最终 `preflight_compress_failed` 的概率。
+ *
+ * 不取更激进（如 0.7）：那样会让大窗口模型的可用上下文被白白砍掉，而真正卡在窗口
+ * 上的只有小窗口模型；边际是「缓冲」不是「惩罚大窗口」。
+ */
+const CONTEXT_WINDOW_SAFETY_MARGIN = 0.9
+
+/** 窗口下限，防止异常值把模型压成不可用。 */
+const CONTEXT_WINDOW_FLOOR = 8_000
+
+/**
+ * 实测观察到的**真实**模型窗口，优先于目录里的乐观值。
+ *
+ * 来源：上游 preflight 报错 `model window 144000 (model=hy3)`。目录（`catalog.ts`
+ * 静态兜底）把 hy3 写成 192_000，但上游真实硬上限是 144_000——多报 48k 会让 DSH
+ * 一直把历史堆到 192k+ 才压缩，等上游真正压缩时已经溢出 104k token，紧急摘要子调用
+ * 又被 429 限流，于是 `preflight_compress_failed` 频发。这里用实测值兜住它。
+ *
+ * 只收实测值，不靠猜：没实测过的模型一律按目录值 × 安全边际处理，避免把今天能过的
+ * 模型也错砍。将来某个模型又实测出更小窗口时，往这里加一行即可。
+ */
+const KNOWN_REAL_CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
+  hy3: 144_000,
+}
+
+/**
+ * 计算应当**广告给 DSH** 的上下文窗口。
+ *
+ * `contextWindow` 是 DSH 派发前的压缩依据（见 `upstream.ts:828` 注释）。它必须
+ * ≤ 真实窗口，否则 DSH 按错误的窗口决定截断多少历史，把过长的上下文一路带到上游
+ * preflight 才压缩，而那时已经太大、压缩又被限流，于是 `preflight_compress_failed`。
+ *
+ * 三层处理，顺序有意义：
+ * 1. 缺失/非正 → 兜底（DSH 对缺窗口模型会以 `INVALID_MODEL_CONTEXT` 失败）；
+ * 2. 有实测真实窗口 → 取 `min(目录值, 实测值)`，不让乐观的目录值越过真实硬上限；
+ * 3. 再乘安全边际，在真实上限下留出缓冲。
+ *
+ * 幂等：对同一个输入重复调用结果一致，方便在 `toModelInfo`（实时路径）与
+ * `fallbackModelsFor`（静态路径）两处各调用一次而不产生漂移。
+ */
+export function effectiveContextWindow(raw: number | undefined, id?: string): number {
+  const base = Number.isFinite(raw as number) && (raw ?? 0) > 0 ? (raw as number) : CATALOG_DEFAULT_CONTEXT_WINDOW
+  const ceiling = id !== undefined ? KNOWN_REAL_CONTEXT_WINDOWS[id] : undefined
+  const capped = ceiling === undefined ? base : Math.min(base, ceiling)
+  const withMargin = Math.floor(capped * CONTEXT_WINDOW_SAFETY_MARGIN)
+  return withMargin < CONTEXT_WINDOW_FLOOR ? CONTEXT_WINDOW_FLOOR : withMargin
+}
+
+/**
  * 剥掉名字末尾的拥挤度符号后缀。
  *
  * 认「空格 + 已知符号」的形式，而不是记住上次加了几位：后者在名册被
@@ -91,9 +151,12 @@ export const FALLBACK_MODELS_GLOBAL: readonly WbModelInfo[] = [
   { id: 'kimi-k2.6', name: 'Kimi-K2.6', contextWindow: 256_000, maxTokens: 32_000, creditMultiplier: 0.52 },
 ]
 
-/** 某区域的静态兜底名册。 */
+/** 某区域的静态兜底名册（已按真实窗口修正并加安全边际）。 */
 export function fallbackModelsFor(region: WbRegion): readonly WbModelInfo[] {
-  return region === 'global' ? FALLBACK_MODELS_GLOBAL : FALLBACK_MODELS_CN
+  const raw = region === 'global' ? FALLBACK_MODELS_GLOBAL : FALLBACK_MODELS_CN
+  // 静态名录里写的是抓取时刻的乐观值（如 hy3=192000），必须过一道修正，否则会越过
+  // 真实窗口（hy3 实测 144000）去告诉 DSH，导致上游 preflight 压缩频发失败。
+  return raw.map(model => ({ ...model, contextWindow: effectiveContextWindow(model.contextWindow, model.id) }))
 }
 
 /**
@@ -105,7 +168,9 @@ export function toModelInfo(model: WbUpstreamModel): WbModelInfo {
   return {
     id: model.id,
     name: model.name,
-    contextWindow: model.contextWindow,
+    // 广告窗口必须 ≤ 真实窗口（见 effectiveContextWindow 的注释）：DSH 按它决定何时
+    // 压缩历史，报大了一路带到上游 preflight 才压，容易触发 `preflight_compress_failed`。
+    contextWindow: effectiveContextWindow(model.contextWindow, model.id),
     maxTokens: model.maxTokens,
     ...model.creditMultiplier === undefined ? {} : { creditMultiplier: model.creditMultiplier },
     ...model.supportsImages === undefined ? {} : { supportsImages: model.supportsImages },
@@ -261,8 +326,15 @@ export class WbCatalog {
       this.lastError = '上游返回了空模型目录，已保留原有列表'
       return false
     }
+    // 实时名录里的 `contextWindow` 是上游给的，同样可能越过真实窗口（hy3 上游给 192000、
+    // 真实 144000），必须过修正再存——否则 `visible()`/`all()` 对外暴露的窗口偏大，
+    // 让 DSH 压缩过晚、上游 preflight 压缩频发失败。
+    const normalized = models.map(model => ({
+      ...model,
+      contextWindow: effectiveContextWindow(model.contextWindow, model.id),
+    }))
     const before = JSON.stringify(this.live ?? [])
-    this.live = models.map(model => ({ ...model }))
+    this.live = normalized
     this.lastUpdatedAtMs = atMs
     this.lastError = undefined
     return JSON.stringify(this.live) !== before

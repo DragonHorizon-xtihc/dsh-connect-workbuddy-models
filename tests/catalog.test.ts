@@ -29,8 +29,12 @@ describe('静态兜底目录', () => {
   it('两个区域各有一份非空 fallback', () => {
     expect(FALLBACK_MODELS_CN.length).toBeGreaterThan(0)
     expect(FALLBACK_MODELS_GLOBAL.length).toBeGreaterThan(0)
-    expect(fallbackModelsFor('cn')).toBe(FALLBACK_MODELS_CN)
-    expect(fallbackModelsFor('global')).toBe(FALLBACK_MODELS_GLOBAL)
+    // fallbackModelsFor 现在会按真实窗口修正（见 effectiveContextWindow），返回的是一份
+    // 派生数组，不再与原始字面量引用相同；断言「id 集合与顺序一致」与「窗口已被修正」。
+    expect(fallbackModelsFor('cn').map(m => m.id)).toEqual(FALLBACK_MODELS_CN.map(m => m.id))
+    expect(fallbackModelsFor('global').map(m => m.id)).toEqual(FALLBACK_MODELS_GLOBAL.map(m => m.id))
+    // 1M 窗口模型被安全边际压到 900000，而不是原始 1000000（见 CONTEXT_WINDOW_SAFETY_MARGIN）。
+    expect(fallbackModelsFor('cn').find(m => m.id === 'deepseek-v4-flash')?.contextWindow).toBe(900_000)
   })
 
   it('CN fallback 不带倍率字段 —— 这正是 undefined 必须区别于 0 的原因', () => {
@@ -105,8 +109,9 @@ describe('WbCatalog 的可用性与开关闸门', () => {
   it('新目录用 fallback，来源标记为 fallback', () => {
     const catalog = new WbCatalog('cn')
     expect(catalog.source).toBe('fallback')
-    expect(catalog.visible()).toBe(FALLBACK_MODELS_CN)
-    expect(catalog.all()).toBe(FALLBACK_MODELS_CN)
+    // visible()/all() 走 fallbackModelsFor，窗口已按真实窗口修正（派生数组，用 toEqual 比深值）。
+    expect(catalog.visible()).toEqual(fallbackModelsFor('cn'))
+    expect(catalog.all()).toEqual(fallbackModelsFor('cn'))
   })
 
   it('应用实时名册后来源变 live，且替换掉 fallback', () => {
