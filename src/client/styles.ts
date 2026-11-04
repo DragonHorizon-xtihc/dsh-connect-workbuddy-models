@@ -123,11 +123,6 @@ export const WB_MODELS_CARD_CSS = `
 .wbm-model-facts{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:var(--dsw-alias-label-tertiary,#999);font-size:11px}
 .wbm-model-id{font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);overflow-wrap:anywhere}
 
-/* ── 跳过文件 ───────────────────────────────────────────────────────────── */
-.wbm-skipped{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--dsw-alias-border-l2,#36373b);padding-top:10px}
-.wbm-skipped-row{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-tertiary,#999)}
-.wbm-skipped-path{font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:11px;overflow-wrap:anywhere;flex:none;max-width:50%}
-
 /* ── 空态 ───────────────────────────────────────────────────────────────── */
 .wbm-empty{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px dashed var(--dsw-alias-border-l2,#36373b);border-radius:8px}
 .wbm-empty-title{margin:0;color:var(--dsw-alias-label-secondary,#c8c8c8);font-size:13px;font-weight:600}

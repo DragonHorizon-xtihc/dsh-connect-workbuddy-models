@@ -273,7 +273,7 @@ interface WbModelsConfig {
    `accessToken`/`refreshToken` 两字段接线、混装不误判、vault `.json` 被发现、双源折叠、
    `$DSH_HOME` 目录布局）。
 3. 构建 `pnpm build` 产出 `lib/index.js` + `lib/client.js`。
-4. 安装：`~/.dsh/profiles/<profile>/package.json` 加 `"dsh-connect-workbuddy-models": "link:/absolute/path/to/dsh-connect-workbuddy-models"`，
+4. 安装：`~/.dsh/profiles/web/package.json` 加 `"dsh-connect-workbuddy-models": "link:D:/ClaudeCode/deepseek-harness/plugins/dsh-connect-workbuddy-models"`，
    `dsh.profile.bundles` 追加 `dsh-connect-workbuddy-models`，然后重启 3080 宿主。
 5. 端到端实测（R5）：见 §6 路由逐个真实调用 + 浏览器验证设置页与输入框读数。
 
@@ -285,5 +285,7 @@ interface WbModelsConfig {
 - 不与 `dsh-connect-workbuddy` / `dsh-xdpool` 抢同一 provider id 或同一 sidebar 座位。
 - **不解密钥就无法读凭据**：本机没装 WorkBuddy 桌面端（且没有 `dsh-connect-workbuddy` 的
   vault 明文副本）时，加密-only 的登录文件会以 `reason:'encrypted'` 显式跳过。这不是本插件
-  能绕过的一步——密钥只存在于桌面端自己的进程里（见 §5.1）。此时「账号数变少」是正确结果，
-  界面会把被跳过的文件与原因一起列出来。
+  能绕过的一步——密钥只存在于桌面端自己的进程里（见 §5.1）。此时「账号数变少」是正确结果。
+- **被跳过的凭据文件不在设置页列出**（应产品要求取消该区块）。`WorkBuddySkippedFile`
+  的数据链路原样保留：`status.skipped` 全量上报，宿主启动日志逐条打印跳过原因
+  （`src/index.ts`），诊断线索仍然可查，只是不再占设置页版面。

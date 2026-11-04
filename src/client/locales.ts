@@ -57,15 +57,6 @@ export const en = {
   'row.rankWhyLater': 'Rank {rank} · waiting · its credits expire later ({time})',
   'row.rankWhyLaterNoExpiry': 'Rank {rank} · waiting · no expiry date, so it queues behind every account that can expire',
 
-  // ── 被跳过的凭据文件 ─────────────────────────────────────────────────────
-  // MUST be surfaced: without it "2 accounts" and "2 readable of 4 files" look
-  // identical on screen, and the user has no way to tell why a sign-in is missing.
-  'row.skippedTitle': 'Sign-in files that were skipped',
-  'row.skippedHint': 'These files exist but could not be used. They are listed rather than hidden so a missing account always has a stated reason.',
-  'row.skippedReason.encrypted': 'The token is encrypted by the system account (Windows builds do this). Re-signing in does not help — this plugin cannot read it, and the existing sign-in stays valid.',
-  'row.skippedReason.unreadable': 'The file could not be read (permissions or a lock held by the WorkBuddy app).',
-  'row.skippedReason.malformed': 'The file is readable but its content is not a WorkBuddy sign-in record.',
-
   // ── 签到 ────────────────────────────────────────────────────────────────
   'row.checkinDone': 'Checked in today',
   'row.checkinPending': 'Not checked in yet',
@@ -229,12 +220,6 @@ export const zh: Record<WbModelsSettingsKey, string> = {
   'row.rankWhyCurrentNoExpiry': '当前在服务 · 没有到期时间（月包会刷新，用不完也不会浪费）',
   'row.rankWhyLater': '第 {rank} 位 · 排队中 · 它的积分到期更晚（{time}）',
   'row.rankWhyLaterNoExpiry': '第 {rank} 位 · 排队中 · 没有到期时间，所以排在所有会过期的账号之后',
-
-  'row.skippedTitle': '被跳过的登录文件',
-  'row.skippedHint': '这些文件确实存在但用不了。这里列出来而不是让它们消失，这样「少了一个账号」永远有一个可读的原因。',
-  'row.skippedReason.encrypted': '令牌被系统账户加密（Windows 版会这样做）。重新登录没用——本插件读不了它，而现有登录仍然有效。',
-  'row.skippedReason.unreadable': '文件读不出来（权限问题，或被 WorkBuddy 应用占用）。',
-  'row.skippedReason.malformed': '文件能读，但内容不是一份 WorkBuddy 登录记录。',
 
   'row.checkinDone': '今日已签',
   'row.checkinPending': '今日未签',

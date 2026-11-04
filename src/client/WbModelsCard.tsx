@@ -6,11 +6,14 @@
  *   1. 顶部：标题 + 「刷新账号」「重新拉取模型」
  *   2. 区域 Tab：国内版 / 国际版
  *   3. 账号池：每账号一行（参与池、签到、积分、到期、临期提醒）
- *   4. 被跳过的凭据文件（**必须**出现，见下）
- *   5. 自动签到（开关 + 时段 + 顺带领取权益）
- *   6. 模型区（名称 + id + 上下文 + 倍率 + 显示勾选 + 全选/全不选 + 保存）
- *   7. 账户使用方式（五选一，每个带一句中文说明）
- *   8. 显示设置（输入框读数开关、临期提醒阈值）
+ *   4. 自动签到（开关 + 时段 + 顺带领取权益）
+ *   5. 模型区（名称 + id + 上下文 + 倍率 + 显示勾选 + 全选/全不选 + 保存）
+ *   6. 账户使用方式（五选一，每个带一句中文说明）
+ *   7. 显示设置（输入框读数开关、临期提醒阈值）
+ *
+ * 被跳过的凭据文件**不再在本页列出**（应产品要求取消该区块）；数据仍由
+ * `status.skipped` 全量上报，并在宿主启动日志里逐条打印（`../index.ts`），
+ * 诊断线索没有消失，只是不占设置页版面。
  *
  * 这个组件是被测的真实实现：测试直接渲染它，不从副本断言。
  *
@@ -63,7 +66,6 @@ import type {
   WbModelInfo,
   WbModelsConfig,
   WbRegion,
-  WbSkippedFile,
   WbStatusSnapshot,
 } from '../status-paths.ts'
 import {
@@ -750,7 +752,6 @@ export function WbModelsCard(props: WbModelsCardProps) {  const t = props.t ?? i
   }, [hours, writeAutomation])
 
   const accounts = status?.accounts ?? []
-  const skipped: readonly WbSkippedFile[] = status?.skipped ?? []
   /**
    * 名次表按账号 id 索引。
    *
@@ -947,22 +948,8 @@ export function WbModelsCard(props: WbModelsCardProps) {  const t = props.t ?? i
           })
         )}
 
-        {/* 被跳过的文件：**必须**出现。否则「2 个账号」与「4 个文件里 2 个读不了」
-            在界面上看起来一模一样，用户没有任何线索知道某次登录为什么不见了。 */}
-        {skipped.length === 0 ? null : (
-          <div className="wbm-skipped">
-            <h4 className="wbm-section-title">{t('row.skippedTitle')}</h4>
-            <p className="wbm-section-hint">{t('row.skippedHint')}</p>
-            {skipped.map(file => (
-              <div key={file.path} className="wbm-skipped-row">
-                <span className="wbm-skipped-path" title={file.path}>{file.path}</span>
-                <span>
-                  {t(`row.skippedReason.${file.reason}` as WbModelsSettingsKey)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* 被跳过的凭据文件区块已按产品要求取消显示。数据仍在 `status.skipped`
+            里全量上报（宿主启动日志逐条打印），此处不再占版面。 */}
       </section>
 
       {/* ── 自动签到 ─────────────────────────────────────────────────── */}
