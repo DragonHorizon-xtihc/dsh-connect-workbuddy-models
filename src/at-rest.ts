@@ -500,7 +500,10 @@ export function stripRegistryQuotes(value: string): string | undefined {
 /** 从 `reg query` 的输出里取 `DisplayIcon` / `InstallLocation`，转成可执行文件路径。 */
 export function registryExecutableFromQuery(output: string): string | undefined {
   for (const key of ['DisplayIcon', 'InstallLocation']) {
-    const match = new RegExp(`"${key}"\\s+REG_SZ\\s+([^\\r\\n]+)`, 'iu').exec(output)
+    // `reg query` 输出的值名（如 `DisplayIcon`）本身是未加引号的，引号只可能出现在
+    // 值数据里（如 `"C:\...\WorkBuddy.exe",0`）。原正则在值名两侧包了 `"`，与真实输出
+    // 不符，导致注册表发现路径永远匹配不上——装在非默认目录的用户因此取不到账号。
+    const match = new RegExp(`${key}\\s+REG_SZ\\s+([^\\r\\n]+)`, 'iu').exec(output)
     if (match?.[1] === undefined) continue
     const normalized = normalizeRegistryExecutable(match[1])
     if (normalized !== undefined) return normalized

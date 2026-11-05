@@ -37,6 +37,7 @@ import {
   findWbAppExecutable,
   isEncryptedFieldWrapper,
   openEncryptedField,
+  registryExecutableFromQuery,
   type WbEncryptedField,
 } from '../src/at-rest.ts'
 import {
@@ -608,5 +609,28 @@ describe('凭据双源：dsh vault 的 .json 必须被扫到（F1 的另一半�
     } finally {
       await rm(home, { recursive: true, force: true })
     }
+  })
+})
+
+describe('registryExecutableFromQuery 解析 reg query 输出（方案3 回归）', () => {
+  // `reg query` 输出里值名（如 `DisplayIcon`）本身不加引号，引号只可能出现在值数据中
+  // （如 `"E:\...\WorkBuddy.exe",0`）。原正则把值名两侧用 `"` 包住，与真实输出不符，
+  // 导致注册表发现路径永远匹配不上——装在非默认目录的用户因此取不到账号。
+  const regOutput = [
+    'HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WorkBuddy',
+    '    DisplayIcon    REG_SZ    "E:\\Programs\\WorkBuddy\\WorkBuddy.exe",0',
+    '    InstallLocation    REG_SZ    E:\\Programs\\WorkBuddy\\',
+    '',
+  ].join('\r\n')
+
+  it('能从标准 reg query 输出里取出可执行文件路径（值名未加引号也要匹配）', () => {
+    expect(registryExecutableFromQuery(regOutput)).toBe('E:\\Programs\\WorkBuddy\\WorkBuddy.exe')
+  })
+
+  it('旧的正则（值名带引号）确实匹配不上——钉死修复只动了引号', () => {
+    // 复刻修复前的写法：值名两侧包 `"`。旧实现下这里必须是 undefined，新实现（上一条）
+    // 必须命中。两者同时成立，才证明修复精确去掉了 `"`、没有引入别的巧合。
+    const oldRegex = (k: string) => new RegExp(`"${k}"\\s+REG_SZ\\s+([^\\r\\n]+)`, 'iu').exec(regOutput)
+    expect(oldRegex('DisplayIcon')?.[1]).toBeUndefined()
   })
 })
